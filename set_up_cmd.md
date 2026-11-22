@@ -1,6 +1,8 @@
 # TERMINAL SET UP
 
 **Palmetto Cluster Access**
+
+A supercomputer can be accessed and used from your personal computer via the terminal, also called a command line interface (CLI). Different operating systems have different CLIs. But the interfaces look relatively the same. Request a connection to the super computer by using the command `ssh`:
 ```sh
   ssh <username>@slogin.palmetto.clemson.edu
 ```
@@ -33,11 +35,15 @@
 ```
 
 ## .bashrc
+
+The `.bashrc` is a user-specific shell script that is read and run on non-login nodes (ie. interactive nodes). This is an ideal place to configure personal commands that you want to apply to every new terminal window you open. This file will be located in your `/home/` directory. It is a hidden file, denoted by the `.` in `.bashrc`. 
 ```sh
+# change directory to home, shortcut: ~
 cd ~
+# edit .bashrc file using a text editor, nano
 nano .bashrc
 ```
-
+There will be text already in the `.bashrc` file. It can be useful to add 1) custom paths to scripts 2) aliases, or custom shortcuts or 3) custom prompt formatting
 ```sh
 ### edit text inside .bashrc file
 ### this is what is in mine (all optional)
@@ -60,6 +66,7 @@ alias interactive='salloc --nodes=1 --ntasks-per-node=1 --cpus-per-task=16 --mem
 alias save_scratch='find /scratch/tecorn -used tecorn -exec touch {} +'
 alias check='squeue -u tecorn'
 ```
+Documentation: https://www.digitalocean.com/community/tutorials/bashrc-file-in-linux
 
 Resource for altering bash prompt: https://robotmoon.com/bash-prompt-generator/ https://bash-prompt-generator.org/ 
 
