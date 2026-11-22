@@ -1,0 +1,468 @@
+### General Workflow
+1. Annotated TEs and Soft-mask genome
+2. Index RNA-seq data
+3. Structural gene annotation
+4. Functional gene annotate: InterProScan, eggNOG-mapper, SignalP
+5. Integrate annotations into gff/gtf file
+6. Evaluation: BUSCO, OrthoFinder
+
+---
+
+## Earl Grey
+
+### job file
+```sh
+#!/bin/sh
+#SBATCH --job-name 07_earlgrey_Pegre
+#SBATCH --output 07_earlgrey_output
+#SBATCH --nodes 1
+#SBATCH --ntasks-per-node 1
+#SBATCH --cpus-per-task 24
+#SBATCH --mem 300gb
+#SBATCH --partition nodeviper
+#SBATCH --time 96:00:00
+#SBATCH --mail-type ALL
+#SBATCH --mail-user tecorn@clemson.edu
+
+ module load anaconda3/2023.09-0
+ source activate earlgrey
+
+ cd /project/viper/venom/Taryn/Plestiodon/Pegregius/genome/07_earlgrey
+
+ earlGrey -g /project/viper/venom/Taryn/Plestiodon/Pegregius/genome/05_YaHs/Pegre-CLP3001_final_genome.fa \
+	-s Pegregius -o output -t 24 -d yes -e yes
+```
+
+#### Verify genome was softmasked
+```sh
+# a proportion of the genome should be lowercase letters
+# use script below to verify- should not be 0
+awk 'BEGIN{uc=lc=0} /^>/ {next} {
+    for(i=1;i<=length($0);i++){
+        c=substr($0,i,1); if(c~/[A-Z]/) uc++; else if(c~/[a-z]/) lc++;
+    }
+} END{printf "upper: %d\nlower: %d\npct_masked: %.2f\n", uc, lc, lc/(uc+lc)*100}' Pegre-CLP3001.softmasked.fasta
+```
+
+A genome soft-masked from repeats is required for BRAKER3.
+
+
+## HISAT2
+Graph-based alignment of next-generation sequencing reads
+
+### Index soft masked genome
+```sh
+module load hisat2
+module load samtools
+
+ cd /project/viper/venom/Taryn/Plestiodon/Pegregius/genome/08_BRAKER/HISAT2
+
+hisat2-build -p 8 Pegre-CLP3001.softmasked.fasta INDEX
+# INDEX is the basename for the index 
+# set up approx 10 min
+```
+
+### .job file
+```sh
+#!/bin/bash
+
+#SBATCH --job-name HISAT2_Pegre
+#SBATCH --output HISAT2_output
+#SBATCH --nodes 1
+#SBATCH --ntasks-per-node 1
+#SBATCH --cpus-per-task 20
+#SBATCH --mem 96gb
+#SBATCH --time 30:00:00
+#SBATCH --mail-type ALL
+#SBATCH --mail-user tecorn@clemson.edu
+
+module load hisat2
+module load samtools
+
+cd /project/viper/venom/Taryn/Plestiodon/Pegregius/genome/08_BRAKER/HISAT2
+
+# build db prior to this script
+
+while read SAMPLE; do
+
+# dir for input RNA files
+BASE="/project/viper/venom/Taryn/Plestiodon/Pegregius/genome/00_raw/Pegre-CLP3001/RNA/01_trim"
+# input file variables
+R1="${BASE}/${SAMPLE}_R1.trim.fq.gz"
+R2="${BASE}/${SAMPLE}_R2.trim.fq.gz"
+
+    echo "Processing ${SAMPLE}..."
+    hisat2 -p 20 --rg-id ${SAMPLE} --rg SM:${SAMPLE} \
+        --summary-file ${SAMPLE}_HISAT2_summary.txt \
+        -x INDEX \
+        -1 ${R1} \
+        -2 ${R2} \
+        -S ${SAMPLE}.sam
+
+    echo "${SAMPLE} added to HISAT2"
+
+# convert to bam files
+    samtools view -@ 10 -b -S -o ${SAMPLE}.bam ${SAMPLE}.sam
+    rm ${SAMPLE}.sam
+
+    samtools view -@ 10 -b -F 4 -o ${SAMPLE}_aligned.bam ${SAMPLE}.bam
+    rm ${SAMPLE}.bam
+
+    samtools sort -@ 10 ${SAMPLE}_aligned.bam -o ${SAMPLE}_aligned_sorted.bam
+    rm ${SAMPLE}_aligned.bam
+
+    samtools index ${SAMPLE}_maligned_sorted.bam
+
+    echo "Converted ${SAMPLE} to sorted .bam"
+
+done < 00_RNA_list.txt
+
+samtools merge -@ 8 -o merged_RNA.bam *_mapped.sorted.bam
+```
+
+## BRAKER
+Structural gene annotation
+
+(copy/pasted from instructions:)
+**NOTE**: **For installation**, manually copy the AUGUSTUS_CONFIG_PATH contents to a writable location before running our containers from Nextflow. Afterwards, you need to specify the writable AUGUSTUS_CONFIG_PATH as command line argument to BRAKER in Nextflow.
+```sh
+## INSTALLATION ONLY
+# create dir in same location as braker3.sif
+mkdir -p $PWD/augustus_config
+# copy config from container
+singularity exec braker3.sif cp -r /opt/Augustus/config/ $PWD/augustus_config
+# fix permissions if necessary 
+chmod -R u+w $PWD/augustus_config/
+# modify test scripts (test1.sh, test2.sh, test3.sh) to bind to new augustus config location
+singularity exec -B $PWD:$PWD -B $PWD/augustus_config:/opt/Augustus/config braker3.sif braker.pl [options]
+### added bind: -B $PWD/augustus_config:/opt/Augustus/config
+```
+
+### protein database prep
+```sh
+#tetrapoda_12 database
+refseq.aa
+
+# if closely related species have .aa file, concat to tetrapoda
+# if closely related species do not have .aa files, convert to .aa first
+# use `seqkit duplicate` to convert file types
+```
+
+### .job file
+```sh
+#!/bin/bash
+#SBATCH --job-name BRAKER_Pegre
+#SBATCH --output 08_BRAKER_v1_output
+#SBATCH --partition nodeviper
+#SBATCH --nodes 1
+#SBATCH --ntasks-per-node 1
+#SBATCH --cpus-per-task 18
+#SBATCH --mem 220gb
+#SBATCH --time 168:00:00
+#SBATCH --mail-type ALL
+#SBATCH --mail-user tecorn@clemson.edu
+
+cd /project/viper/venom/Taryn/Plestiodon/Pegregius/genome/08_BRAKER
+
+singularity exec -B $PWD:$PWD -B $PWD/augustus_config/config:/opt/Augustus/config braker3.sif braker.pl \
+  --species=PlestiodonEgregius \
+  --genome=./HISAT2/Pegregius.softmasked.fasta \
+  --prot_seq=./proteins/tetrapod_Pfasc_Pgilb_db.faa \
+  --bam=./HISAT2/merged_RNA.bam \
+  --workingdir=braker_output_v1 \
+  --threads=18
+# not including an protseq database could dramatically inflate the number of gene loci identified
+```
+
+The output .aa file is the extracted protein sequences file. This is required for the functional annotation steps.
+
+To check the amount of gene loci identified by BRAKER, use:
+```sh
+grep -c $'\tgene\t' braker.gtf
+```
+
+***Results from previous BRAKER inputs combinations***
+
+   BRAKER_output_v1 -(RNAseq data only)-> 54849 genes
+
+   BRAKER_output_v2 -(RNAseq data + tetrapoda protein database)-> 15002 genes / 88.5% C BUSCO
+
+   BRAKER_output_v3 -(RNAseq data + tetrapoda protein database + 1 closely related sp protein database)-> 17455 genes / 88.7% C
+
+   BRAKER_output_v4 -(RNAseq data + tetrapoda protein database + 2 closely related sp protein database)-> 
+
+
+## BUSCO 
+
+### .job file
+```sh
+  module load anaconda3/2023.09-0
+  source activate busco
+
+  cd /project/viper/venom/Taryn/Pegregius/genome/08_BRAKER
+
+  busco -i ./braker_output_v1/braker.aa -m proteins -l ~/busco/lineages/tetrapoda_odb12 -c 24 -o busco
+
+# Total running time: 438 seconds
+```
+
+## InterProScan
+Protein domains, protein families, functional sites, and GO terms
+
+### .job file
+```sh
+#!/bin/bash
+#SBATCH --job-name=InterPro_Pegre
+#SBATCH --output=09_InterProScan_output
+#SBATCH --nodes=1
+#SBATCH --partition=nodeviper
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=24
+#SBATCH --mem=250gb
+#SBATCH --time=120:00:00
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=tecorn@clemson.edu
+
+# load java
+module load java/11.0.2
+
+cd /project/viper/venom/Taryn/Plestiodon/Pegregius/genome/09_functional_anno/InterProScan
+mkdir -p output
+
+interproscan.sh \
+  -i ../../08_BRAKER/HISAT2/Pegregius.softmasked.fasta \
+  -f XML,GFF3,TSV \
+  -dp \
+  -cpu 24 \
+  -appl Pfam,SMART,TIGRFAM,CDD \
+  -iprlookup \
+  -goterms \
+  -d ./output
+```
+
+## eggNOG-mapper
+Orthology-based functional annotation (GO terms, KEGG pathways, COG categories)
+
+#### Preparation of braker.gtf output file (using agat)
+```sh
+source activate agat
+
+# extract .gtf of longest isoform
+agat_sp_keep_longest_isoform.pl \
+ -f braker.gtf \
+ -o Pegre_longIso.gtf \
+ --cpu 8
+
+# extract .aa of longest isoform
+agat_sp_extract_sequences.pl \
+ --gff Pegre_longIso.gtf \
+ --fasta Pegre-CLP3001.softmasked.fasta \
+ --type cds \
+ --merge \
+ --protein \
+ --clean_final_stop \
+ --output Pegre_longIso.aa
+```
+
+### .job file
+```sh
+#!/bin/bash
+#SBATCH --job-name eggnog_Pegre
+#SBATCH --output 09_eggNOG-mapper_output
+#SBATCH --nodes 1
+#SBATCH --partition nodeviper
+#SBATCH --ntasks-per-node 1
+#SBATCH --cpus-per-task 8
+#SBATCH --mem 16gb
+#SBATCH --time 2:00:00
+#SBATCH --mail-type ALL
+#SBATCH --mail-user tecorn@clemson.edu
+
+module load anaconda3/2023.09-0
+source activate eggnog
+
+cd /project/viper/venom/Taryn/Plestiodon/Pegregius/genome/09_functional_anno/eggNOG-mapper
+
+mkdir -p output
+
+emapper.py \
+  -i Pegre_longIso.aa \
+  --data_dir /project/viper/venom/Taryn/bin/eggnog-mapper-data \
+  -m diamond \
+  --dmnd_db /project/viper/venom/Taryn/bin/eggnog-mapper-data/eggnog_proteins.dmnd \
+  --cpu 8 \
+  --output_dir ./output/ \
+  -o Pegregius \
+  --override
+```
+
+## SignalP
+
+## .job file
+```sh
+#!/bin/bash
+#SBATCH --job-name SignalP_Pegre
+#SBATCH --output SignalP_output
+#SBATCH --nodes 1
+#SBATCH --partition nodeviper
+#SBATCH --ntasks-per-node 1
+#SBATCH --cpus-per-task 24
+#SBATCH --mem 100gb
+#SBATCH --time 48:00:00
+#SBATCH --mail-type ALL
+#SBATCH --mail-user tecorn@clemson.edu
+
+INPUT=genome.proteins.fa
+OUTDIR=output
+PREFIX=Plestiodon_egregius
+
+mkdir -p $OUTDIR
+cd ~/signalp/signalp5/bin || { echo "cd failed"; exit 1; }
+
+# Run SignalP
+./signalp \
+  -fasta $INPUT \
+  -org euk \
+  -format short \
+  -prefix $OUTDIR/$PREFIX
+
+```
+
+## Merging annotation (manual)
+
+```sh
+grep "^>" braker.longest.proteins.aa | sed 's/^>//' > gene_ids.txt
+```
+
+### Parse
+```sh
+# EggNog_Mapper:
+awk -F"\t" '
+BEGIN {OFS="\t"}
+NR==1 || $1 !~ /^#/ {
+  print $1,$7,$8,$9,$12,$13,$14
+}' emapper.emapper.annotations > eggnog.cleaned.tsv
+
+
+
+# SignalP:
+awk '
+BEGIN{OFS="\t"}
+$1 !~ /^#/ && $2 ~ /^SP/ {
+    print $1, "Signal_peptide", $5
+}
+' Geoemyda_japonica_summary.signalp5 \
+> signalp.cleaned.tsv
+
+
+
+# Now time to combine them all together in a final annotation wrapper:
+#Remove eggnog comment line:
+grep -v "^##" eggnog.cleaned.tsv > eggnog.tmp.tsv
+```
+
+```sh
+# Summarize InterProScan:
+gawk '
+BEGIN { OFS="\t" }
+
+$12 ~ /^IPR/ {
+    key = $1 SUBSEP $12
+    ipr[key] = 1
+    desc[$1 SUBSEP $13] = 1
+}
+
+$14 ~ /^GO:/ {
+    go[$1 SUBSEP $14] = 1
+}
+
+END {
+    for (k in ipr) {
+        split(k, a, SUBSEP)
+        id = a[1]
+        iprs[id] = iprs[id] a[2] ","
+    }
+
+    for (k in desc) {
+        split(k, a, SUBSEP)
+        if (a[2] != "-" && a[2] != "")
+            descs[a[1]] = descs[a[1]] a[2] ","
+    }
+
+    for (k in go) {
+        split(k, a, SUBSEP)
+        gos[a[1]] = gos[a[1]] a[2] "|"
+    }
+
+    for (id in iprs) {
+        sub(/,$/, "", iprs[id])
+        sub(/,$/, "", descs[id])
+        sub(/\|$/, "", gos[id])
+        print id, iprs[id], (descs[id]==""?"-":descs[id]), (gos[id]==""?"-":gos[id])
+    }
+}
+' braker.longest.aa.tsv | sort -k1,1 > interpro.collapsed.final.tsv
+```
+
+### Merge
+```sh
+awk -F'\t' 'BEGIN{OFS="\t"}
+# Load InterPro
+FILENAME=="interpro.collapsed.final.tsv" && FNR>0 {
+    ipr[$1]=$2
+    domains[$1]=$3
+    go[$1]=$4
+    next
+}
+
+# Load EggNOG
+FILENAME=="eggnog.cleaned.tsv" {
+    # Skip header lines
+    if($1 ~ /^##/) next
+    egg_type[$1]=$2
+    egg_desc[$1]=$3
+    egg_gene[$1]=$4
+    egg_ko[$1]=$5
+    egg_path[$1]=$6
+    egg_module[$1]=$7
+    next
+}
+
+# Load SignalP
+FILENAME=="signalp.cleaned.tsv" {
+    signal[$1]=$2
+    cs[$1]=$3
+    next
+}
+
+# Process BRAKER protein IDs
+FILENAME=="braker.longest.proteins.fa" {
+    if(substr($0,1,1)==">") {
+        gsub("^>","",$0)
+        id=$0
+        print id,
+              (ipr[id]?ipr[id]:"-"),
+              (domains[id]?domains[id]:"-"),
+              (go[id]?go[id]:"-"),
+              (egg_type[id]?egg_type[id]:"-"),
+              (egg_desc[id]?egg_desc[id]:"-"),
+              (egg_gene[id]?egg_gene[id]:"-"),
+              (egg_ko[id]?egg_ko[id]:"-"),
+              (egg_path[id]?egg_path[id]:"-"),
+              (egg_module[id]?egg_module[id]:"-"),
+              (signal[id]?signal[id]:"No_signal_peptide"),
+              (cs[id]?cs[id]:"-")
+    }
+}' interpro.collapsed.final.tsv eggnog.cleaned.tsv signalp.cleaned.tsv braker.longest.proteins.fa \
+> master_annotation.tsv
+```
+
+### QAQC
+```sh
+wc -l master_annotation.tsv
+# 17652 master_annotation.tsv
+awk -F'\t' '$2 != "-" && $5 != "-" {count++} END{print count}' master_annotation.tsv
+# 9148
+awk -F'\t' '$2=="-" && $5=="-" && $11=="No_signal_peptide" {count++} END{print count}' master_annotation.tsv
+# 102
+```
