@@ -37,8 +37,9 @@ git clone <url.git>
 
 ### Update Repository
 ```sh
+# after altering local version of repo
 git add -A
-git commit -m "Rename directory"
+git commit -m "Write description of changes here"
 git push origin <branch-name>
 # don't know the master branch name?
 # use `git branch`
