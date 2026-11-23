@@ -1,3 +1,9 @@
+# Git vs. GitHub
+
+<description here>
+  
+Documentation: https://git-scm.com/
+
 ## How do I edit my GitHub repository from my PC terminal?
 
 ### Install git and GitHub
