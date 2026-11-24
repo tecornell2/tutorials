@@ -7,6 +7,10 @@ A supercomputer can be accessed and used from your personal computer via the ter
   ssh <username>@slogin.palmetto.clemson.edu
 ```
 
+![Schematic of supercomputer system](https://training.pages.sigma2.no/tutorials/hpc-intro/_images/connect-to-remote-login-node.svg)
+
+Soruce: https://training.pages.sigma2.no/tutorials/hpc-intro/episodes/12-cluster.html 
+
 ## Linux/Unix basic commands
 
 ```sh
