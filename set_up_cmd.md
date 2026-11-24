@@ -1,4 +1,4 @@
-# TERMINAL SET UP
+# Setting Up your Terminal
 
 **Palmetto Cluster Access**
 
