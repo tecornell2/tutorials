@@ -1,6 +1,6 @@
 # Setting Up your Terminal
 
-**Palmetto Cluster Access**
+**Supercomputer Cluster Access**
 
 A supercomputer can be accessed and used from your personal computer via the terminal, also called a command line interface (CLI). Different operating systems have different CLIs. But the interfaces look relatively the same. Request a connection to the super computer by using the command `ssh`:
 ```sh
